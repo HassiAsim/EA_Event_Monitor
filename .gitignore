@@ -1,0 +1,25 @@
+# Questa/ModelSim outputs
+work/
+questa_lib/
+modelsim.ini
+transcript
+vsim.wlf
+*.wlf
+*.ucdb
+*.log
+*.mpf
+*.mti
+*.ini
+
+# Quartus outputs 
+db/
+incremental_db/
+output_files/
+*.qpf
+*.qsf
+*.qws
+
+# OS/editor junk
+.vscode/
+Thumbs.db
+.DS_Store

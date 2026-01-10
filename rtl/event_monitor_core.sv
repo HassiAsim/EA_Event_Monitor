@@ -23,7 +23,11 @@ module event_monitor_core #(
   output logic evt_valid,
 
   output logic triggered_sticky,
-  output logic fifo_overflow_sticky
+  output logic fifo_overflow_sticky,
+
+  output logic fifo_empty,
+  output logic fifo_full,
+  output logic [$clog2(FIFO_DEPTH + 1)-1:0] fifo_count
 );
 
   localparam int EVT_W = TS_W + ID_W + PROBE_W;
@@ -40,9 +44,6 @@ module event_monitor_core #(
   logic [EVT_W-1:0] pending_event;
 
   logic [EVT_W-1:0] fifo_pop_data;
-  logic fifo_empty;
-  logic fifo_full;
-  logic [$clog2(FIFO_DEPTH + 1)-1:0] fifo_count;
   logic fifo_overflow;
   logic fifo_underflow;
 
@@ -51,7 +52,6 @@ module event_monitor_core #(
 
   always_comb begin
     trig_hit_now = 1'b0;
-
     unique case (trig_mode)
       2'd0: trig_hit_now = (masked_probe == masked_value);
       2'd1: trig_hit_now = ((masked_probe_d == '0) && (masked_probe != '0));
@@ -64,9 +64,7 @@ module event_monitor_core #(
       ts <= '0;
       masked_probe_d <= '0;
     end else begin
-      if (en) begin
-        ts <= ts + 1'b1;
-      end
+      if (en) ts <= ts + 1'b1;
       masked_probe_d <= masked_probe;
     end
   end
@@ -86,9 +84,7 @@ module event_monitor_core #(
         push_pending <= 1'b1;
       end
 
-      if (fifo_overflow) begin
-        fifo_overflow_sticky <= 1'b1;
-      end
+      if (fifo_overflow) fifo_overflow_sticky <= 1'b1;
     end
   end
 

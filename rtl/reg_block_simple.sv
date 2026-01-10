@@ -35,6 +35,7 @@ module reg_block_simple #(
 
   localparam int EVT_W = TS_W + ID_W + PROBE_W;
   localparam int EVT_WORDS = (EVT_W + 31) / 32;
+  localparam int FC_W = $clog2(FIFO_DEPTH + 1);
 
   localparam logic [7:0] ADDR_CONTROL = 8'h00;
   localparam logic [7:0] ADDR_TRIG_VALUE = 8'h04;
@@ -45,25 +46,36 @@ module reg_block_simple #(
   logic [EVT_W-1:0] evt_shadow;
   logic evt_shadow_valid;
 
-  int unsigned word_idx;
+  logic [1:0] cap_cnt;
 
-  function automatic [31:0] evt_word_at(input int unsigned idx);
-    int unsigned lo;
-    int unsigned rem;
+  function automatic [7:0] pack_count8(input logic [FC_W-1:0] fc);
+    int i;
     begin
-      evt_word_at = 32'h0;
-      lo = idx * 32;
+      pack_count8 = 8'h0;
+      for (i = 0; i < 8; i = i + 1) begin
+        if (i < FC_W) pack_count8[i] = fc[i];
+      end
+    end
+  endfunction
 
-      if (lo < EVT_W) begin
-        rem = EVT_W - lo;
-        if (rem >= 32) begin
-          evt_word_at = evt_shadow[lo +: 32];
-        end else begin
-          evt_word_at[rem-1:0] = evt_shadow[lo +: rem];
+  function automatic [31:0] word_from_vec(input logic [EVT_W-1:0] v, input int unsigned idx);
+    int unsigned lo;
+    int b;
+    begin
+      word_from_vec = 32'h0;
+      lo = idx * 32;
+      for (b = 0; b < 32; b = b + 1) begin
+        if ((lo + b) < EVT_W) begin
+          word_from_vec[b] = v[lo + b];
         end
       end
     end
   endfunction
+
+  int unsigned word_idx;
+  logic have_event;
+  logic [EVT_W-1:0] event_vec;
+  logic [31:0] r;
 
   always_ff @(posedge clk) begin
     if (!rst_n) begin
@@ -78,8 +90,18 @@ module reg_block_simple #(
       evt_pop <= 1'b0;
       evt_shadow <= '0;
       evt_shadow_valid <= 1'b0;
+      cap_cnt <= 2'd0;
     end else begin
       evt_pop <= 1'b0;
+
+      if (cap_cnt != 2'd0) begin
+        cap_cnt <= cap_cnt - 2'd1;
+
+        if (cap_cnt == 2'd1) begin
+          evt_shadow <= evt_data;
+          evt_shadow_valid <= 1'b1;
+        end
+      end
 
       if (bus_wr) begin
         unique case (bus_addr)
@@ -103,12 +125,14 @@ module reg_block_simple #(
       end
 
       if (bus_rd) begin
+        r = 32'h0;
+
         unique case (bus_addr)
           ADDR_CONTROL: begin
-            bus_rdata <= 32'h0;
-            bus_rdata[0] <= en;
-            bus_rdata[1] <= arm;
-            bus_rdata[3:2] <= trig_mode;
+            r[0] = en;
+            r[1] = arm;
+            r[3:2] = trig_mode;
+            bus_rdata <= r;
           end
 
           ADDR_TRIG_VALUE: begin
@@ -120,30 +144,38 @@ module reg_block_simple #(
           end
 
           ADDR_STATUS: begin
-            bus_rdata <= 32'h0;
-            bus_rdata[0] <= fifo_empty;
-            bus_rdata[1] <= fifo_full;
-            bus_rdata[15:8] <= fifo_count[7:0];
-            bus_rdata[16] <= triggered_sticky;
-            bus_rdata[17] <= fifo_overflow_sticky;
+            r[0] = fifo_empty;
+            r[1] = fifo_full;
+            r[15:8] = pack_count8(fifo_count);
+            r[16] = triggered_sticky;
+            r[17] = fifo_overflow_sticky;
+            bus_rdata <= r;
           end
 
           default: begin
             if (bus_addr >= ADDR_EVENT_BASE && bus_addr < (ADDR_EVENT_BASE + EVT_WORDS * 4)) begin
               word_idx = (bus_addr - ADDR_EVENT_BASE) >> 2;
 
+              have_event = evt_shadow_valid || (cap_cnt == 2'd1);
+              event_vec = evt_shadow_valid ? evt_shadow : evt_data;
+
               if (word_idx == 0) begin
-                if (evt_valid) begin
+                if (have_event) begin
+                  bus_rdata <= word_from_vec(event_vec, 0);
+                end else if (evt_valid && (cap_cnt == 2'd0)) begin
                   evt_pop <= 1'b1;
-                  evt_shadow <= evt_data;
-                  evt_shadow_valid <= 1'b1;
-                  bus_rdata <= evt_data[31:0];
+                  cap_cnt <= 2'd2;
+                  bus_rdata <= 32'h0;
                 end else begin
                   bus_rdata <= 32'h0;
                 end
               end else begin
-                if (evt_shadow_valid) begin
-                  bus_rdata <= evt_word_at(word_idx);
+                if (have_event) begin
+                  bus_rdata <= word_from_vec(event_vec, word_idx);
+
+                  if (word_idx == (EVT_WORDS - 1)) begin
+                    evt_shadow_valid <= 1'b0;
+                  end
                 end else begin
                   bus_rdata <= 32'h0;
                 end
@@ -158,4 +190,7 @@ module reg_block_simple #(
   end
 
 endmodule
+
+
+
 

@@ -33,17 +33,20 @@ module event_monitor_core #(
   localparam int EVT_W = TS_W + ID_W + PROBE_W;
 
   logic [TS_W-1:0] ts;
-
   logic [PROBE_W-1:0] masked_probe;
   logic [PROBE_W-1:0] masked_value;
   logic [PROBE_W-1:0] masked_probe_d;
-
   logic trig_hit_now;
 
   logic push_pending;
   logic [EVT_W-1:0] pending_event;
 
   logic [EVT_W-1:0] fifo_pop_data;
+  logic [EVT_W-1:0] fifo_peek_data;
+
+  logic [EVT_W-1:0] last_popped;
+  logic last_popped_valid;
+
   logic fifo_overflow;
   logic fifo_underflow;
 
@@ -93,8 +96,9 @@ module event_monitor_core #(
     .rst_n(rst_n),
     .push(push_pending),
     .push_data(pending_event),
-    .pop(evt_pop),
+    .pop(evt_pop && !fifo_empty),
     .pop_data(fifo_pop_data),
+    .peek_data(fifo_peek_data),
     .empty(fifo_empty),
     .full(fifo_full),
     .count(fifo_count),
@@ -102,7 +106,21 @@ module event_monitor_core #(
     .underflow(fifo_underflow)
   );
 
-  assign evt_data = fifo_pop_data;
+  always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+      last_popped <= '0;
+      last_popped_valid <= 1'b0;
+    end else begin
+      last_popped_valid <= 1'b0;
+      if (evt_pop && !fifo_empty) begin
+        last_popped <= fifo_peek_data;
+        last_popped_valid <= 1'b1;
+      end
+    end
+  end
+
+  assign evt_data = last_popped_valid ? last_popped : fifo_peek_data;
   assign evt_valid = !fifo_empty;
 
 endmodule
+

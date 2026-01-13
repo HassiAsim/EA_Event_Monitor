@@ -5,44 +5,43 @@ module trigger_unit #(
 )(
   input logic clk,
   input logic rst_n,
-
+  input logic en,
+  input logic arm,
   input logic [PROBE_W-1:0] probe_data,
   input logic [PROBE_W-1:0] trig_value,
   input logic [PROBE_W-1:0] trig_mask,
   input logic [1:0] trig_mode,
-
   output logic trigger_hit
 );
 
   logic [PROBE_W-1:0] masked_probe;
   logic [PROBE_W-1:0] masked_value;
-  logic [PROBE_W-1:0] masked_probe_d; // previous masked_probe
+  logic [PROBE_W-1:0] masked_probe_d;
+  logic raw_hit;
 
   assign masked_probe = probe_data & trig_mask;
   assign masked_value = trig_value & trig_mask;
 
-  // Register trigger_hit so we can use the old masked_probe_d value
-  always_ff @(posedge clk) begin
+  always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       masked_probe_d <= '0;
-      trigger_hit <= 1'b0;
-    end else begin
-      trigger_hit <= 1'b0;
-
-      unique case (trig_mode)
-        2'd0: begin
-          trigger_hit <= (masked_probe == masked_value);
-        end
-        2'd1: begin
-          trigger_hit <= ((masked_probe_d == '0) && (masked_probe != '0));
-        end
-        default: begin
-          trigger_hit <= 1'b0;
-        end
-      endcase
-
+    end else if (en) begin
       masked_probe_d <= masked_probe;
     end
   end
 
+  always_comb begin
+    raw_hit = 1'b0;
+    unique case (trig_mode)
+      2'b00: raw_hit = (masked_probe == masked_value);
+      2'b01: raw_hit = ((masked_probe_d != masked_value) && (masked_probe == masked_value));
+      default: raw_hit = 1'b0;
+    endcase
+  end
+
+  always_comb begin
+    trigger_hit = en && arm && raw_hit;
+  end
+
 endmodule
+

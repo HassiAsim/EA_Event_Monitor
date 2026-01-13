@@ -13,6 +13,8 @@ module tb_fifo;
   logic pop;
   logic [W-1:0] pop_data;
 
+  logic [W-1:0] peek_data;
+
   logic empty;
   logic full;
   logic [$clog2(DEPTH+1)-1:0] count;
@@ -22,13 +24,19 @@ module tb_fifo;
   sync_fifo #(.W(W), .DEPTH(DEPTH)) dut (
     .clk(clk),
     .rst_n(rst_n),
+
     .push(push),
     .push_data(push_data),
+
     .pop(pop),
     .pop_data(pop_data),
+
+    .peek_data(peek_data),
+
     .empty(empty),
     .full(full),
     .count(count),
+
     .overflow(overflow),
     .underflow(underflow)
   );
@@ -36,12 +44,24 @@ module tb_fifo;
   initial clk = 1'b0;
   always #5 clk = ~clk;
 
+  // reference queue
   logic [W-1:0] q[$];
 
   task automatic do_push(input logic [W-1:0] v);
     bit should_overflow;
+    logic [W-1:0] exp_peek;
 
     should_overflow = (q.size() >= DEPTH);
+
+    // expected peek AFTER a successful push:
+    // - if queue was empty, new head becomes v
+    // - else head stays the same
+    if (!should_overflow) begin
+      if (q.size() == 0) exp_peek = v;
+      else               exp_peek = q[0];
+    end else begin
+      exp_peek = (q.size() > 0) ? q[0] : '0;
+    end
 
     @(negedge clk);
     push = 1'b1;
@@ -60,6 +80,13 @@ module tb_fifo;
 
     if (!should_overflow) begin
       q.push_back(v);
+    end
+
+    // peek should reflect current head whenever not empty
+    if (q.size() > 0) begin
+      if (peek_data !== exp_peek) begin
+        $fatal(1, "PEEK mismatch exp=%h got=%h time=%0t", exp_peek, peek_data, $time);
+      end
     end
 
     @(negedge clk);
@@ -91,6 +118,13 @@ module tb_fifo;
       if (pop_data !== exp) begin
         $fatal(1, "POP mismatch exp=%h got=%h time=%0t", exp, pop_data, $time);
       end
+
+      // after pop, if still not empty, peek should show new head
+      if (q.size() > 0) begin
+        if (peek_data !== q[0]) begin
+          $fatal(1, "PEEK(after pop) mismatch exp=%h got=%h time=%0t", q[0], peek_data, $time);
+        end
+      end
     end
 
     @(negedge clk);
@@ -111,6 +145,7 @@ module tb_fifo;
     do_push(72'h0003);
     do_push(72'h0004);
 
+    // overflow attempt
     do_push(72'h0005);
 
     do_pop();
@@ -118,6 +153,7 @@ module tb_fifo;
     do_pop();
     do_pop();
 
+    // underflow attempt
     do_pop();
 
     $display("FIFO test PASSED");

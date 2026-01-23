@@ -1,5 +1,3 @@
-`timescale 1ns/1ps
-
 module event_monitor_core #(
   parameter int PROBE_W = 32,
   parameter int ID_W = 8,
@@ -11,6 +9,9 @@ module event_monitor_core #(
 
   input logic en,
   input logic arm,
+  // FIX 1: Added input
+  input logic clear_sticky, 
+  
   input logic [1:0] trig_mode,
   input logic [PROBE_W-1:0] trig_value,
   input logic [PROBE_W-1:0] trig_mask,
@@ -62,7 +63,7 @@ module event_monitor_core #(
     endcase
   end
 
-  always_ff @(posedge clk) begin
+  always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       ts <= '0;
       masked_probe_d <= '0;
@@ -72,7 +73,8 @@ module event_monitor_core #(
     end
   end
 
-  always_ff @(posedge clk) begin
+  // FIX 2: Sticky Logic Update
+  always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       push_pending <= 1'b0;
       pending_event <= '0;
@@ -81,13 +83,20 @@ module event_monitor_core #(
     end else begin
       push_pending <= 1'b0;
 
+      // Capture Logic
       if (en && arm && trig_hit_now) begin
         triggered_sticky <= 1'b1;
         pending_event <= {ts, probe_id, probe_data};
         push_pending <= 1'b1;
       end
 
+      // Overflow Logic
       if (fifo_overflow) fifo_overflow_sticky <= 1'b1;
+
+      if (clear_sticky) begin
+         triggered_sticky <= 1'b0;
+         fifo_overflow_sticky <= 1'b0;
+      end
     end
   end
 

@@ -114,9 +114,11 @@ module tb_top_bus_uvm_lite;
     bus_write(ADDR_CONTROL, 32'h0000_0003);
 
     @(negedge clk);
-    probe_data = 32'h0000_1234;
+    probe_data = 32'h0000_1234; // Trigger High
+    @(negedge clk);
+    probe_data = 32'h0000_0000; // Trigger Low (Stop filling the FIFO!)
 
-    repeat (2) @(posedge clk);
+    repeat (2) @(posedge clk);;
 
     bus_read(ADDR_STATUS, r);
     if (r[16] !== 1'b1) $fatal(1, "Expected triggered_sticky=1");
@@ -164,19 +166,29 @@ module tb_top_bus_uvm_lite;
     int i;
 
     probe_id = 8'h11;
-    probe_data = 32'h0000_1234;
+    probe_data = 32'h0; // Start clean
 
     bus_write(ADDR_TRIG_MASK, 32'hFFFF_FFFF);
     bus_write(ADDR_TRIG_VALUE, 32'h0000_1234);
     bus_write(ADDR_CONTROL, 32'h0000_0003);
 
+    // 1. TURN OFF SVA ALARM
+    // We target the specific instance: dut -> u_core -> u_fifo -> a_no_overflow_loss
+    $assertoff(0, tb_top_bus_uvm_lite.dut.u_core.u_fifo.a_no_overflow_loss);
+
+    // 2. FILL THE FIFO UNTIL IT BURSTS
     for (i = 0; i < (FIFO_DEPTH + 2); i++) begin
       @(negedge clk);
-      probe_data = 32'h0;
-      @(negedge clk);
       probe_data = 32'h0000_1234;
-      @(posedge clk);
+      @(negedge clk);
+      probe_data = 32'h0; // Pulse it to create distinct events
     end
+    
+    // Wait for the chaos to settle
+    repeat(2) @(posedge clk);
+
+    // 3. TURN ALARM BACK ON
+    $asserton(0, tb_top_bus_uvm_lite.dut.u_core.u_fifo.a_no_overflow_loss);
 
     bus_read(ADDR_STATUS, r);
     if (r[17] !== 1'b1) $fatal(1, "Expected fifo_overflow_sticky=1");
@@ -190,13 +202,19 @@ module tb_top_bus_uvm_lite;
     logic [31:0] w2;
 
     probe_id = 8'h7E;
-    probe_data = 32'hDEAD_BEEF;
+    probe_data = 32'h0; // Start clean!
 
     bus_write(ADDR_TRIG_MASK, 32'hFFFF_FFFF);
     bus_write(ADDR_TRIG_VALUE, 32'hDEAD_BEEF);
     bus_write(ADDR_CONTROL, 32'h0000_0003);
 
-    repeat (2) @(posedge clk);
+    // Pulse the data ONCE
+    @(negedge clk);
+    probe_data = 32'hDEAD_BEEF;
+    @(negedge clk);
+    probe_data = 32'h0; // Clear it so we don't fill the FIFO
+
+    repeat (4) @(posedge clk);
 
     bus_read(ADDR_EVENT_BASE, w0);
     bus_read(ADDR_EVENT_BASE + 8'h04, w1);

@@ -1,5 +1,3 @@
-`timescale 1ns/1ps
-
 module sync_fifo #(
   parameter int W = 72,
   parameter int DEPTH = 16
@@ -12,8 +10,7 @@ module sync_fifo #(
 
   input  logic        pop,
   output logic [W-1:0] pop_data,
-
-  output logic [W-1:0] peek_data,   
+  output logic [W-1:0] peek_data,    
 
   output logic empty,
   output logic full,
@@ -41,7 +38,8 @@ module sync_fifo #(
 
   assign peek_data = empty ? '0 : mem[rptr];
 
-  always_ff @(posedge clk) begin
+  // FIX: Added 'or negedge rst_n' for Asynchronous Reset
+  always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
       wptr      <= '0;
       rptr      <= '0;
@@ -57,7 +55,6 @@ module sync_fifo #(
       underflow <= 1'b0;
 
       do_pop  = pop && !empty;
-
       do_push = push && (!full || do_pop);
 
       if (pop && empty) underflow <= 1'b1;
@@ -81,4 +78,37 @@ module sync_fifo #(
     end
   end
 
+
+  // SYSTEMVERILOG ASSERTIONS 
+  // Note: 'disable iff (!rst_n)' ensures we don't check during reset.
+  
+  // 1. Safety: Never Push to a Full FIFO (unless we are also Popping)
+  // Logic: If (push is high) AND (fifo is full), THEN (pop must also be high)
+  property p_no_overflow_loss;
+    @(posedge clk) disable iff (!rst_n)
+    (push && full) |-> pop;
+  endproperty
+  
+  a_no_overflow_loss: assert property (p_no_overflow_loss)
+    else $error("SVA ERROR: Attempted to push to full FIFO without popping!");
+
+  // 2. Safety: Never Pop from an Empty FIFO
+  // Logic: It is illegal to assert 'pop' if 'empty' is true.
+  property p_no_underflow;
+    @(posedge clk) disable iff (!rst_n)
+    (pop) |-> !empty; 
+  endproperty
+
+  a_no_underflow: assert property (p_no_underflow)
+    else $error("SVA ERROR: Attempted to pop from empty FIFO!");
+
+  // 3. Liveness: If we push (and not full), count must increase next cycle
+  // Logic: If (push && !pop && !full), next cycle count == count + 1
+  property p_count_inc;
+    @(posedge clk) disable iff (!rst_n)
+    (push && !pop && !full) |=> (count == $past(count) + 1'b1);
+  endproperty
+
+  a_count_inc: assert property (p_count_inc)
+    else $error("SVA ERROR: FIFO count did not increment after push!");
 endmodule

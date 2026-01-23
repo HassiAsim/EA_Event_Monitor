@@ -43,5 +43,20 @@ module trigger_unit #(
     trigger_hit = en && arm && raw_hit;
   end
 
+  // SYSTEMVERILOG ASSERTIONS (SVA)
+
+  // 1. Safety: Trigger output implies Enabled and Armed were high
+  // Logic: If trigger_hit is high, then EN and ARM *must* have been high.
+  property p_trigger_safety;
+    @(posedge clk) disable iff (!rst_n)
+    trigger_hit |-> (en && arm);
+  endproperty
+
+  a_trigger_safety: assert property (p_trigger_safety)
+    else $error("SVA ERROR: Trigger fired while unit was disabled or disarmed!");
+
+  // 2. Unknown Check: Output should never be X/Z
+  a_valid_out_check: assert property (@(posedge clk) disable iff (!rst_n) !$isunknown(trigger_hit));
+
 endmodule
 

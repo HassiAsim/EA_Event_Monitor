@@ -1,195 +1,141 @@
-# Embedded Analytics Event Monitor (EA-EM) - Specification
+# Embedded Analytics Event Monitor Specification
 
-## 1. Purpose 
-EA-EM is a small hardware IP block that records internal "events" into a trace buffer.
-An event is captured when a configurable trigger condition occurs on a monitored signal ("probe").
-Captured events are stored in an on-chip FIFO so software can read them later.
+| **Version** | **Date** | **Description** |
+| ----------- | -------- | --------------- |
+| 1.0         | Jan 2026 | Initial Release |
 
-This IP is meant to simulate a common "embedded analytics/debug" feature inside chips:
-- Watch internal signals
-- Detect interesting conditions (trigger)
-- Record timestamped data
-- Let software read the trace
-- Optionally raise an interrupt (IRQ)
+---
 
-## 2. High-level block diagram 
-Inputs:
-- clk, rst_n
-- probe_data[PROBE_W-1:0]
-- probe_id[7:0] (which probe/source this data corresponds to)
+## 1. Overview
 
-Main blocks:
-1) Timestamp Counter
-2) Trigger Unit (level / rising-edge)
-3) Event Packer (formats {timestamp, probe_id, probe_data})
-4) Trace FIFO (stores event words)
-5) Register Block (config + status + data pop)
-6) IRQ logic (optional interrupt to CPU)
+The **EA-EM** (Embedded Analytics Event Monitor) is a configurable hardware IP block designed for real-time silicon debug. It passively monitors an internal signal bus ("probe"), detects configurable trigger conditions, and captures timestamped event data into an on-chip FIFO for software analysis.
 
-Outputs:
-- irq
-- register read data (via internal bus or via AXI-Lite wrapper)
+### 1.1 Features
 
-## 3. Interfaces
-### 3.1 Core ports (signals this IP has)
-- clk: clock
-- rst_n: active-low synchronous reset (all regs reset when rst_n=0)
-- probe_data[PROBE_W-1:0]: monitored value
-- probe_id[7:0]: identifier for the probe source
-- irq: interrupt output (level)
+* **Configurable Triggering:** Supports Level-Sensitive and Rising-Edge detection logic.
+* **Timestamping:** 32-bit internal counter stamps every event relative to system reset.
+* **Deep Visibility:** Captures Source ID, Payload Data, and Timestamp in every packet.
+* **APB-Style Interface:** Simple 32-bit read/write bus for configuration and data retrieval.
+* **Interrupt Support:** Level-sensitive IRQ output for Trigger Hit or FIFO Overflow events.
 
-### 3.2 Register access (two-stage approach)
-The design is split into:
-A) A simple internal register bus used by the core:
-- reg_wr, reg_rd, reg_addr, reg_wdata, reg_rdata
+---
 
-B) An optional AXI4-Lite wrapper that converts AXI-Lite transactions into the simple internal bus.
-This keeps the core simple while still supporting an industry-standard bus externally.
+## 2. Hardware Architecture
 
-## 4. Parameterization
-- PROBE_W: width of probe_data (default 32)
-- TS_W: timestamp width (default 32)
-- FIFO_DEPTH: number of events stored (default 16)
-- EVENT_W: event width = TS_W + 8 + PROBE_W
+### 2.1 Configurable Parameters
 
-Default event format width (32 + 8 + 32) = 72 bits.
+The IP is parameterized at synthesis time to fit specific SoC requirements.
 
-## 5. Event definition
-### 5.1 Event word format
-An event word is packed as:
+| Parameter    | Default | Description                                |
+| ------------ | ------- | ------------------------------------------ |
+| `PROBE_W`    | 32      | Width of the monitored data signal.        |
+| `ID_W`       | 8       | Width of the Probe ID (source identifier). |
+| `TS_W`       | 32      | Width of the internal timestamp counter.   |
+| `FIFO_DEPTH` | 16      | Depth of the internal Trace FIFO.          |
 
-event[EVENT_W-1:0] = { timestamp[TS_W-1:0], probe_id[7:0], probe_data[PROBE_W-1:0] }
+### 2.2 Signal Interface
 
-This means software can reconstruct:
-- when it happened (timestamp)
-- which probe (probe_id)
-- what value was observed (probe_data)
+| Group               | Signal       | Width     | Direction | Description                                                            |
+| ------------------- | ------------ | --------- | --------- | ---------------------------------------------------------------------- |
+| **Clock/Reset**     | `clk`        | 1         | Input     | System Clock.                                                          |
+|                     | `rst_n`      | 1         | Input     | Active-low asynchronous reset. Resets all registers and FIFO.          |
+| **Probe Interface** | `probe_data` | `PROBE_W` | Input     | The live data signal being monitored.                                  |
+|                     | `probe_id`   | `ID_W`    | Input     | Static identifier for the probe source (e.g., 0x01 = CPU, 0x02 = DMA). |
+| **Register Bus**    | `bus_addr`   | 8         | Input     | Byte-aligned register address.                                         |
+|                     | `bus_wr`     | 1         | Input     | Write Enable (1 = Write).                                              |
+|                     | `bus_rd`     | 1         | Input     | Read Enable (1 = Read).                                                |
+|                     | `bus_wdata`  | 32        | Input     | Write Data payload.                                                    |
+|                     | `bus_rdata`  | 32        | Output    | Read Data payload.                                                     |
+| **Interrupts**      | `irq`        | 1         | Output    | Level-sensitive interrupt line.                                        |
 
-### 5.2 When an event is captured
-An event is pushed into the FIFO when ALL are true:
-- CTRL.en == 1
-- CTRL.arm == 1
-- trigger_hit == 1
-- FIFO is not full
+---
 
-If FIFO is full when capture is attempted:
-- an overflow flag is set (sticky)
-- the event is dropped
+## 3. Register Map
 
-Note: In the first version, we capture exactly "one event per trigger hit".
-Later versions may support "capture N events after trigger", but that is out of scope for v1.
+All registers are 32-bit wide. Access must be word-aligned.
 
-## 6. Timestamp counter behavior
-- timestamp increments by 1 each clock cycle when not in reset
-- timestamp resets to 0 when rst_n=0
-- timestamp is included in every recorded event
+| Offset | Name           | Type | Description                                               |
+| ------ | -------------- | ---- | --------------------------------------------------------- |
+| `0x00` | **CTRL**       | RW   | Main Control Register (Enable/Arm/Mode).                  |
+| `0x04` | **TRIG_VALUE** | RW   | Value to compare against the probe data.                  |
+| `0x08` | **TRIG_MASK**  | RW   | Bitmask for trigger comparison (1 = Compare, 0 = Ignore). |
+| `0x0C` | **IRQ_MASK**   | RW   | Interrupt Enable Mask.                                    |
+| `0x10` | **STATUS**     | RO   | Status flags (Sticky bits and FIFO levels).               |
+| `0x14` | **STATUS_W1C** | WO   | Write-1-to-Clear register for sticky flags.               |
+| `0x20` | **DATA_POP_0** | RO   | FIFO Pop Register (Word 0: Data).                         |
+| `0x24` | **DATA_POP_1** | RO   | FIFO Pop Register (Word 1: ID + Partial TS).              |
+| `0x28` | **DATA_POP_2** | RO   | FIFO Pop Register (Word 2: Remaining TS).                 |
 
-## 7. Trigger behavior
-### 7.1 Trigger inputs
-- trig_value[PROBE_W-1:0]
-- trig_mask[PROBE_W-1:0]
-- trig_mode[1:0]
+### 3.1 CTRL (0x00)
 
-Masking rule:
-Only masked bits are compared. A bit is "active" if trig_mask bit = 1.
+| Bit | Name   | Description                                                                                                                                                                    |
+| --- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 0   | `EN`   | **Global Enable.**<br><br>0: Block disabled. Counters reset.<br><br>1: Block enabled. Timestamp counter runs.                                                                  |
+| 1   | `ARM`  | **Trigger Arm.**<br><br>1: Armed. Ready to capture events.<br><br>0: Disarmed. Triggers are ignored. Hardware clears this bit automatically after a single-shot trigger fires. |
+| 3:2 | `MODE` | **Trigger Mode.**<br><br>`00`: Level Sensitive (Match `VAL` & `MASK`).<br><br>`01`: Rising Edge (0 to Non-Zero transition).<br><br>`10-11`: Reserved.                          |
 
-masked_probe = probe_data & trig_mask
-masked_value = trig_value & trig_mask
+### 3.2 STATUS (0x10)
 
-### 7.2 Trigger modes
-Mode 0: LEVEL compare
-- trigger_hit = (masked_probe == masked_value)
+| Bit  | Name          | Description                                                               |
+| ---- | ------------- | ------------------------------------------------------------------------- |
+| 0    | `TRIG_STICKY` | Set to 1 when a trigger occurs. Remains 1 until cleared via `STATUS_W1C`. |
+| 1    | `OVF_STICKY`  | Set to 1 if an event is dropped because the FIFO was full.                |
+| 2    | `EMPTY`       | 1 if FIFO is empty.                                                       |
+| 3    | `FULL`        | 1 if FIFO is full.                                                        |
+| 15:8 | `COUNT`       | Current number of events in the FIFO.                                     |
 
-Mode 1: RISING edge detect (masked)
-- trigger_hit when masked_probe goes from 0 to non-zero
-- implementation uses a 1-cycle delayed sample of masked_probe
+### 3.3 Interrupts (IRQ_MASK & Output)
 
-Modes 2/3: reserved (treated as no trigger)
+The `irq` output signal is a logical OR of enabled sticky flags:
 
-## 8. FIFO / trace buffer behavior
-- FIFO stores event words in order captured
-- FIFO status:
-  - empty when count==0
-  - full when count==FIFO_DEPTH
-- pop behavior:
-  - reading DATA_POP pops exactly one event word from FIFO (if not empty)
+```verilog
+irq = (IRQ_MASK[0] & TRIG_STICKY) | (IRQ_MASK[1] & OVF_STICKY);
+```
 
-If DATA_POP is read while empty:
-- underflow flag may be raised internally (debug)
-- returned data is undefined (software should check STATUS.empty first)
+To clear the interrupt, software must write `1` to the corresponding bit in `STATUS_W1C` (0x14).
 
-## 9. Register map (32-bit, byte addresses)
-All registers are 32-bit. reg_addr is byte-based.
+---
 
-### 9.1 CTRL (0x00) — RW
-bit0  en: enables the block (0=off)
-bit1  arm: arms trigger capture (1=armed)
-bit3:2 trig_mode:
-  0 = level
-  1 = rising
-  others reserved
+## 4. Functional Description
 
-Reset value: 0x00000000
+### 4.1 Trigger Logic
 
-### 9.2 TRIG_VALUE (0x04) — RW
-Lower PROBE_W bits used.
-Reset: 0x00000000
+* **Mode 0 (Level):** Fires when `(probe_data & TRIG_MASK) == (TRIG_VALUE & TRIG_MASK)`.
+* **Mode 1 (Rising Edge):** Fires when the masked data transitions from `0` to any non-zero value.
+* **Capture Rule:** An event is only captured if `EN=1`, `ARM=1`, and `FIFO_FULL=0`.
 
-### 9.3 TRIG_MASK (0x08) — RW
-Lower PROBE_W bits used.
-Reset: all 1s in lower PROBE_W bits (compare all bits by default)
+### 4.2 Data Packet Format
 
-### 9.4 IRQ_MASK (0x0C) — RW
-bit0 trigger_irq_en
-bit1 overflow_irq_en
-Reset: 0x00000000 (IRQs disabled by default)
+Each event is a 72-bit packet stored in the FIFO. Since the bus is only 32-bits wide, software must perform **three consecutive reads** from the `DATA_POP` region to retrieve one full event.
 
-### 9.5 STATUS (0x10) — RO
-bit0 triggered_sticky (set when trigger_hit occurs while armed)
-bit1 overflow_sticky  (set when capture attempted while FIFO full)
-bit2 fifo_empty
-bit3 fifo_full
-bits15:8 fifo_count (zero-extended)
+**Event Structure:**
+`{ timestamp[31:0], probe_id[7:0], probe_data[31:0] }`
 
-Reset: 0x0000000? (flags cleared, fifo_empty=1)
+**Software Read Sequence:**
 
-### 9.6 STATUS_W1C (0x14) — WO (write-1-to-clear)
-bit0 clear triggered_sticky
-bit1 clear overflow_sticky
+1. **Read 0x20:** Returns `probe_data[31:0]` (the raw data).
+2. **Read 0x24:** Returns `timestamp[15:8]` merged with `probe_id[7:0]`.
+3. **Read 0x28:** Returns `timestamp[31:16]`.
 
-Writing 1 clears the corresponding sticky flag.
-Writing 0 has no effect.
+Note: Reading address `0x20` triggers the FIFO **POP**. Addresses `0x24` and `0x28` are shadow registers holding the data from that pop.
 
-### 9.7 DATA_POP (0x20) — RO (read pops)
-Reading this register pops one FIFO entry and returns the event.
-Because the event is 72 bits and the bus is 32 bits, the event is returned over 3 reads:
+---
 
-Read 0x20 (POP_LO): returns event[31:0]      (probe_data[31:0] for default widths)
-Read 0x24 (POP_MID): returns event[63:32]    (probe_id and part of timestamp)
-Read 0x28 (POP_HI): returns event[71:64]     (remaining timestamp bits, zero-extended)
+## 5. Verification Strategy
 
-Note: If PROBE_W or TS_W change, the split may be adjusted; v1 targets TS_W=32 and PROBE_W=32.
+This IP has been verified using a **UVM Lite** simulation environment.
 
-## 10. Interrupt behavior (irq output)
-irq is level-high when enabled conditions occur:
+* **Testbench Architecture:** SystemVerilog testbench with constrained-random stimulus and self-checking scoreboards.
 
-irq = (IRQ_MASK.trigger_irq_en  & triggered_sticky)
-   |  (IRQ_MASK.overflow_irq_en & overflow_sticky)
+* **Regression Suite:**
 
-IRQ remains asserted until the sticky flag is cleared using STATUS_W1C.
+  1. `LEVEL_BASIC`: Verifies data matching and simple timestamp capture.
+  2. `RISE_BASIC`: Verifies edge detection logic.
+  3. `EVENT_MULTIWORD`: Verifies the 3-word pack/unpack data integrity.
+  4. `OVERFLOW_STICKY`: Stresses the FIFO to validate overflow flags and data protection.
 
-## 11. Reset behavior
-When rst_n=0:
-- CTRL resets to 0 (disabled)
-- trigger config resets (TRIG_VALUE=0, TRIG_MASK=all 1s)
-- sticky flags cleared
-- FIFO cleared (count=0, empty=1)
-- timestamp resets to 0
-- irq deasserted
+* **SVA (Assertions):** Inline assertions monitor critical illegal states:
 
-## 12. Out-of-scope (v1)
-- Multi-probe selection and probe routing inside the IP
-- Capturing "N cycles after trigger"
-- Compression or filtering of events
-- DMA or streaming trace output
-- Full AXI-Lite performance features (multiple outstanding transactions)
+  * **FIFO Overflow:** Ensures no push occurs when `full=1`.
+  * **FIFO Underflow:** Ensures no pop occurs when `empty=1`.
+  * **Unknowns:** Checks for `X` states on the bus during valid transactions.

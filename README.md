@@ -1,69 +1,54 @@
 # Embedded Analytics Event Monitor (EA-EM)
 
-> **Note**: This project is a work in progress. Features and enhancements are still being added.
+**A configurable hardware IP block for real-time silicon debug and logic analysis.**
 
-A hardware IP block that monitors internal signals and records timestamped events when trigger conditions occur. Events are stored in an on-chip FIFO for software analysis.
+The EA-EM monitors internal hardware signals ("probes") and captures timestamped events when specific trigger conditions are met. Designed for SoC debugging, it features an APB-style register interface and an automated UVM Lite verification suite.
 
-## Overview
-
-The EA-EM monitors probe signals and captures events based on configurable trigger conditions:
-- **Signal Monitoring** - Watch probe data with configurable IDs
-- **Trigger Detection** - Level compare or rising edge detection
-- **Event Storage** - FIFO stores timestamped events (timestamp + probe_id + probe_data)
-- **Register Interface** - Software-accessible control and status registers
-- **Interrupt Support** - Optional IRQ generation
+## Key Features
+- **Configurable Triggering:** Supports Level-Sensitive and Rising-Edge detection.
+- **On-Chip Storage:** Captures Timestamp, Probe ID, and Data into a configurable FIFO.
+- **Robust Verification:**
+  - **UVM Lite Testbench:** Automated self-checking regression suite.
+  - **SVA (SystemVerilog Assertions):** Integrated checks for FIFO overflow and protocol violations.
+  - **Coverage Model:** Functional coverage hooks (implemented but disabled for Starter Edition compatibility).
+- **Automation:** Tcl-based simulation flow compatible with Siemens Questa/ModelSim.
 
 ## Project Structure
-
+```text
 EA_Event_Monitor/
-├── docs/          # Specification document
-├── rtl/           # RTL design files
-├── tb/            # Testbench files
-├── sim/           # Simulation scripts
-└── sva/           # SystemVerilog assertions
+├── rtl/            # SystemVerilog Design (RTL)
+├── tb/             # UVM Lite Testbench & Tests
+├── sim/            # Simulation Scripts (Makefile, Tcl)
+└── docs/           # Detailed Specifications
+```
 
-## Key Parameters
+## How to Run
 
-- `PROBE_W`: Probe data width (default: 32 bits)
-- `ID_W`: Probe ID width (default: 8 bits)
-- `TS_W`: Timestamp width (default: 32 bits)
-- `FIFO_DEPTH`: Number of events stored (default: 16)
+### 1. Automated Regression (Recommended)
+Run the full UVM-Lite regression suite (compiles design, runs all 4 tests, checks SVA).
 
-## Trigger Modes
-
-- **Mode 0**: Level compare - trigger when probe matches trigger value
-- **Mode 1**: Rising edge - trigger on 0→non-zero transition
-
-## Register Map
-
-| Address | Name        | Description                    |
-|---------|-------------|--------------------------------|
-| 0x00    | CTRL        | Control (enable, arm, mode)    |
-| 0x04    | TRIG_VALUE  | Trigger comparison value       |
-| 0x08    | TRIG_MASK   | Trigger mask bits              |
-| 0x0C    | IRQ_MASK    | Interrupt enable mask          |
-| 0x10    | STATUS      | Status flags and FIFO count    |
-| 0x14    | STATUS_W1C  | Clear sticky flags             |
-| 0x20-0x28| DATA_POP   | Read event data (3 registers)  |
-
-## Running Simulations
-
-Using ModelSim/Questa Simulator:
+**Requires:** GNU Make
 
 ```bash
 cd sim
-vsim -do run_core.do      # Core module test
-vsim -do run_top.do       # Top-level test
-vsim -do run_regress.do   # Regression suite
+make uvm
 ```
 
-## Basic Usage
+### 2. Manual Regression (No Make)
+If you do not have `make` installed, you can run the simulator command directly:
 
-1. Configure trigger value and mask
-2. Set trigger mode (0=level, 1=rising)
-3. Enable and arm: `CTRL.en = 1`, `CTRL.arm = 1`
-4. Monitor `STATUS` register for captured events
-5. Read events via `DATA_POP` registers (3 consecutive reads)
+```bash
+cd sim
+vsim -c -do "do run_uvm_regress.do; quit -f"
+```
+
+### 3. Visual Debug (Waveforms)
+To open the GUI, load the design, and view signals in the waveform viewer:
+
+```bash
+cd sim
+vsim -do run_debug.do
+```
 
 ## Requirements
 

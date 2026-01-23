@@ -1,7 +1,7 @@
 if {[file exists work]} {vdel -lib work -all}
 vlib work
 
-# 1. COMPILE
+# COMPILE
 vlog -sv ../tb/common/simple_bus_if.sv \
   ../rtl/sync_fifo.sv \
   ../rtl/trigger_unit.sv \
@@ -12,8 +12,8 @@ vlog -sv ../tb/common/simple_bus_if.sv \
   ../tb/tests/tb_top_bus_uvm_lite.sv
 
 set optname tb_uvm_reg_opt_[clock seconds]
-vopt tb_top_bus_uvm_lite -o $optname
 
+vopt tb_top_bus_uvm_lite -o $optname
 
 set tests {LEVEL_BASIC RISE_BASIC EVENT_MULTIWORD OVERFLOW_STICKY}
 
@@ -27,9 +27,7 @@ foreach t $tests {
   run -all
 
   quit -sim
-  
   puts "TEST DONE: $t"
 }
 
 puts "ALL UVM-LITE TESTS DONE"
-

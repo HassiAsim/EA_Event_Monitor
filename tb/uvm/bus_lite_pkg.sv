@@ -233,4 +233,57 @@ package bus_lite_pkg;
     endtask
   endclass
 
+
+/*
+  // FUNCTIONAL COVERAGE COLLECTOR
+
+  class coverage_collector;
+    
+    logic [1:0] trig_mode;
+    logic fifo_full;
+    logic fifo_empty;
+    logic fifo_overflow;
+
+    // Define the Covergroup
+    covergroup cg_event_monitor;
+      option.per_instance = 1;
+      
+      // Cover Point: Are we testing both Level (0) and Edge (1) modes?
+      cp_mode: coverpoint trig_mode {
+        bins level_mode = {0};
+        bins edge_mode  = {1};
+      }
+
+      // Cover Point: Did we ever fill the FIFO?
+      cp_full: coverpoint fifo_full {
+        bins not_full = {0};
+        bins hit_full = {1};
+      }
+
+      // Cover Point: Did we ever cause an overflow? (Crucial for robustness)
+      cp_overflow: coverpoint fifo_overflow {
+        bins safe = {0};
+        bins disaster = {1};
+      }
+
+      // Cross Coverage: Did we overflow in BOTH modes?
+      cross_mode_overflow: cross cp_mode, cp_overflow;
+
+    endgroup
+
+    // Constructor
+    function new();
+      cg_event_monitor = new();
+    endfunction
+
+    // Sample Function (Call this from the Monitor/Test)
+    function void sample(logic [1:0] t_mode, logic full, logic overflow);
+      this.trig_mode = t_mode;
+      this.fifo_full = full;
+      this.fifo_overflow = overflow;
+      cg_event_monitor.sample();
+    endfunction
+
+  endclass
+*/
 endpackage

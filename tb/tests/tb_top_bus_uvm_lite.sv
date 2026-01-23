@@ -4,6 +4,8 @@ module tb_top_bus_uvm_lite;
 
   import bus_lite_pkg::*;
 
+  // coverage_collector cov;
+
   localparam int PROBE_W = 32;
   localparam int ID_W = 8;
   localparam int TS_W = 32;
@@ -262,6 +264,7 @@ module tb_top_bus_uvm_lite;
     rst_n = 1'b1;
 
     env = new(bus_if, exp_evt_mbx);
+    //cov = new();
     env.start();
 
     if (!$value$plusargs("TEST=%s", tname)) tname = "LEVEL_BASIC";
@@ -275,5 +278,19 @@ module tb_top_bus_uvm_lite;
     $display("tb_top_bus_uvm_lite DONE");
     $finish;
   end
+
+  // Coverage Sampling Block
+  /*
+  always @(posedge clk) begin
+    if (cov != null) begin
+      // We peek into the DUT signals directly (Whitebox Coverage)
+      cov.sample(
+        dut.u_regs.trig_mode,
+        dut.u_core.fifo_full,
+        dut.u_core.fifo_overflow_sticky
+      );
+    end
+  end
+  */
 
 endmodule
